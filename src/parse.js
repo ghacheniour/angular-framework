@@ -166,6 +166,7 @@ AST.ArrayExpression = 'ArrayExpression';
 AST.ObjectExpression = 'ObjectExpression';
 AST.Property = 'Property';
 AST.Identifier = 'Identifier';
+AST.ThisExpression = 'ThisExpression';
 
 /* verify token without consuming */
 AST.prototype.peek = function(e) {
@@ -234,7 +235,8 @@ AST.prototype.object = function() {
 AST.prototype.constants = {
     'null': {type: AST.Literal, value: null},
     'true': {type: AST.Literal, value: true},
-    'false': {type: AST.Literal, value: false}
+    'false': {type: AST.Literal, value: false},
+    'this': {type: AST.ThisExpression}
 };
 
 /* detect number or string */
@@ -242,7 +244,7 @@ AST.prototype.constant = function() {
     return {type: AST.Literal, value: this.consume().value};
 };
 
-/* construct the body of ast object*/
+/* loop over the tokens and onstruct the body of the ast object*/
 AST.prototype.primary = function() {
     if (this.expect('[')) {
         return this.arrayDeclaration();
@@ -250,6 +252,8 @@ AST.prototype.primary = function() {
         return this.object();
     } else if (this.constants.hasOwnProperty(this.tokens[0].text)) {
         return this.constants[this.consume().text];
+    } else if (this.peek().identifier) {
+        return this.identifier();
     } else {
         return this.constant();
     }
@@ -276,6 +280,23 @@ ASTCompiler.prototype.stringEscapeFn = function(c) {
     return '\\u' + ('0000' + c.charCodeAt(0).toString(16)).slice(-4);
 };
 
+/* helper: build variables*/
+ASTCompiler.prototype.nextId = function() {
+    var id = 'v' + (this.state.nextId++);
+    this.state.vars.push(id); 
+    return id;
+};
+
+/* helper: build assign statement*/
+ASTCompiler.prototype.assign = function(id, value) {
+    return id + '=' + value + ';';
+};
+
+/* helper: build if statement*/
+ASTCompiler.prototype.if_ = function(test, consequent) {
+    this.state.body.push('if(', test, '){', consequent, '}');
+};
+
 /* used to add quotes to string and detect null value*/
 ASTCompiler.prototype.escape = function(value) {
     if (_.isString(value)) {
@@ -285,6 +306,10 @@ ASTCompiler.prototype.escape = function(value) {
     } else {
         return value;
     }
+};
+/* generate (left).right */
+ASTCompiler.prototype.nonComputedMember = function(left, right) {
+    return '(' + left + ').' + right;
 };
 /* will build body of the function */
 ASTCompiler.prototype.recurse = function(ast) {
@@ -307,16 +332,24 @@ ASTCompiler.prototype.recurse = function(ast) {
             return key + ':' + value;
         }, this));
         return '{' + properties.join(',') + '}';
+    case AST.Identifier:
+        var intoId = this.nextId();
+        this.if_('s',  this.assign(intoId, this.nonComputedMember('s', ast.name)));
+        return intoId;
+    case AST.ThisExpression:
+        return 's';
     }
 };
 
 /* compile the ast object to function */
 ASTCompiler.prototype.compile = function(text) {
     var ast = this.astBuilder.ast(text);
-    this.state = {body: []};
+    this.state = {body: [], nextId: 0, vars: []};
     this.recurse(ast);
      /* jshint -W054 */
-    return new Function(this.state.body.join(''));
+    return new Function('s',
+                        (this.state.vars.length ? 'var ' + this.state.vars.join(',') + ';' :'') +
+                        this.state.body.join(''));
     /* jshint +W054 */
 };
 
