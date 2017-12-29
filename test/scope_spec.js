@@ -314,6 +314,81 @@ describe('Scope', function() {
             scope.$digest();
             expect(scope.counter).toBe(0);
         });
+        it('accepts expressions for watch functions', function() {
+            var theValue;
+            scope.aValue = 42;
+            scope.$watch('aValue', function(newValue, oldValue, scope) {
+                theValue = newValue;
+            });
+            scope.$digest();
+            expect(theValue).toBe(42);
+        });
+        it('accepts expressions for watch functions', function() {
+            var theValue;
+            scope.aColl = [1, 2, 3];
+            scope.$watchCollection('aColl', function(newValue, oldValue, scope) {
+                theValue = newValue;
+            });
+            scope.$digest();
+            expect(theValue).toEqual([1, 2, 3]);
+        });
+        it('accepts one-time watches', function() {
+            var theValue;
+            scope.aValue = 42;
+            scope.$watch('::aValue', function(newValue, oldValue, scope) {
+                theValue = newValue;
+            });
+            scope.$digest();
+            expect(theValue).toBe(42);
+        });
+        it('removes one-time watches after first invocation', function() {
+            scope.aValue = 42;
+            scope.$watch('::aValue', function() { });
+            scope.$digest();
+            expect(scope.$$watchers.length).toBe(0);
+        });
+        it('does not remove one-time-watches until value is defined', function() {
+            scope.$watch('::aValue', function() { });
+            scope.$digest();
+            expect(scope.$$watchers.length).toBe(1);
+            scope.aValue = 42;
+            scope.$digest();
+            expect(scope.$$watchers.length).toBe(0);
+        });
+        it('does not remove one-time-watches until value stays defined', function() {
+            scope.aValue = 42;
+            scope.$watch('::aValue', function() { });
+            var unwatchDeleter = scope.$watch('aValue', function() {
+                delete scope.aValue;
+            });
+            scope.$digest();
+            expect(scope.$$watchers.length).toBe(2);
+            scope.aValue = 42;
+            unwatchDeleter();
+            scope.$digest();
+            expect(scope.$$watchers.length).toBe(0);
+        });
+        /*it('does not remove one-time watches before all array items defined', function() {
+            scope.$watch('::[1, 2, aValue]', function() { }, true);
+            scope.$digest();
+            expect(scope.$$watchers.length).toBe(1);
+            scope.aValue = 3;
+            scope.$digest();
+            expect(scope.$$watchers.length).toBe(0);
+        });
+        it('does not remove one-time watches before all object vals defined', function() {
+            scope.$watch('::{a: 1, b: aValue}', function() { }, true);
+            scope.$digest();
+            expect(scope.$$watchers.length).toBe(1);
+            scope.aValue = 3;
+            scope.$digest();
+            expect(scope.$$watchers.length).toBe(0);
+        });*/
+        it('removes constant watches after first invocation', function() {
+            scope.$watch('[1, 2, 3]', function() {});
+            scope.$digest();
+            expect(scope.$$watchers.length).toBe(0);
+        });
     });
 
     describe('$eval', function() {
@@ -335,6 +410,9 @@ describe('Scope', function() {
                 return scope.aValue + arg;
             }, 2);
             expect(result).toBe(44);
+        });
+        it('accepts expressions in $eval', function() {
+            expect(scope.$eval('42')).toBe(42);
         });
     });
 
@@ -360,6 +438,10 @@ describe('Scope', function() {
                 scope.aValue = 'someOtherValue';
             });
             expect(scope.counter).toBe(2);
+        });
+        it('accepts expressions in $apply', function() {
+            scope.aFunction = _.constant(42);
+            expect(scope.$apply('aFunction()')).toBe(42);
         });
     });
 
@@ -491,6 +573,17 @@ describe('Scope', function() {
 		done();
 	    }, 50);
 	});
+        it('accepts expressions in $evalAsync', function(done) {
+            var called;
+            scope.aFunction = function() {
+                called = true;
+            };
+            scope.$evalAsync('aFunction()');
+            scope.$$postDigest(function() {
+                expect(called).toBe(true);
+                done();
+            });
+        });
     });
 
     describe('$applyAsync', function() {
