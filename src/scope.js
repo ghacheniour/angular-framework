@@ -290,7 +290,6 @@ Scope.prototype.$watchCollection = function(watchFn, listenerFn) {
     var trackVeryOldValue = (listenerFn.length > 1);
     var firstRun = true;
     watchFn = parse(watchFn);
-
     var internalWatchFn = function(scope) {
 	var newLength;
 	newValue = watchFn(scope);
