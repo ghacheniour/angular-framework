@@ -1106,7 +1106,6 @@ ASTCompiler.prototype.compile = function(text) {
     var fnString = this.filterPrefix() + 'var fn=function(s,l){' +
         (this.state.fn.vars.length ? 'var ' + this.state.fn.vars.join(',') + ';' : '' ) +
         this.state.fn.body.join('') + '};' + this.watchFns() +  extra +'return fn;';
-    console.log(fnString);
     /* jshint -W054 */
     var fn = new Function(
         'ensureSafeMemberName',
