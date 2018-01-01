@@ -127,7 +127,58 @@ describe('injector', function() {
 	var fn = function(a, b) { return a + b; };
 	expect(injector.invoke(fn)).toBe(3);
     });
-    it('instantiates an annotated constructor function', function() {
+    describe('annotate', function() {
+	it('returns the $inject annotation of a function when it has one', function() {
+	    var injector = createInjector([]);
+	    var fn = function() { };
+	    fn.$inject = ['a', 'b'];
+	    expect(injector.annotate(fn)).toEqual(['a', 'b']);
+	});
+	it('returns the array-style annotations of a function', function() {
+	    var injector = createInjector([]);
+	    var fn = ['a', 'b', function() { }];
+	    expect(injector.annotate(fn)).toEqual(['a', 'b']);
+	});
+	it('returns an empty array for a non-annotated 0-arg function', function() {
+	    var injector = createInjector([]);
+	    var fn = function() { };
+	    expect(injector.annotate(fn)).toEqual([]);
+	});
+	it('returns annotations parsed from function args when not annotated', function() {
+	    var injector = createInjector([]);
+	    var fn = function(a, b) { };
+	    expect(injector.annotate(fn)).toEqual(['a', 'b']);
+	});
+	it('strips comments from argument lists when parsing', function() {
+	    var injector = createInjector([]);
+	    var fn = function(a, /*b,*/ c) { };
+	    expect(injector.annotate(fn)).toEqual(['a', 'c']);
+	});
+	it('strips several comments from argument lists when parsing', function() {
+	    var injector = createInjector([]);
+	    var fn = function(a, /*b,*/ c/*, d*/) { };
+	    expect(injector.annotate(fn)).toEqual(['a', 'c']);
+	});
+	it('strips // comments from argument lists when parsing', function() {
+	    var injector = createInjector([]);
+	    var fn = function(a, //b,
+			      c) { };
+	    expect(injector.annotate(fn)).toEqual(['a', 'c']);
+	});
+	it('strips surrounding underscores from argument names when parsing', function() {
+	    var injector = createInjector([]);
+	    var fn = function(a, _b_, c_, _d, an_argument) { };
+	    expect(injector.annotate(fn)).toEqual(['a', 'b', 'c_', '_d', 'an_argument']);
+	});
+	it('throws when using a non-annotated fn in strict mode', function() {
+	    var injector = createInjector([], true);
+	    var fn = function(a, b, c) { };
+	    expect(function() {
+		injector.annotate(fn);
+	    }).toThrow();
+	});
+    });
+        it('instantiates an annotated constructor function', function() {
 	var module = window.angular.module('myModule', []);
 	module.constant('a', 1);
 	module.constant('b', 2);
@@ -182,55 +233,152 @@ describe('injector', function() {
 	var instance = injector.instantiate(Type, {b: 3});
 	expect(instance.result).toBe(4);
     });
-    describe('annotate', function() {
-	it('returns the $inject annotation of a function when it has one', function() {
-	    var injector = createInjector([]);
-	    var fn = function() { };
-	    fn.$inject = ['a', 'b'];
-	    expect(injector.annotate(fn)).toEqual(['a', 'b']);
+    it('allows registering a provider and uses its $get', function() {
+	var module = window.angular.module('myModule', []);
+	module.provider('a', {
+	    $get: function() {
+		return 42;
+	    }
 	});
-	it('returns the array-style annotations of a function', function() {
-	    var injector = createInjector([]);
-	    var fn = ['a', 'b', function() { }];
-	    expect(injector.annotate(fn)).toEqual(['a', 'b']);
+	var injector = createInjector(['myModule']);
+	expect(injector.has('a')).toBe(true);
+	expect(injector.get('a')).toBe(42);
+    });
+    it('injects the $get method of a provider', function() {
+	var module = window.angular.module('myModule', []);
+	module.constant('a', 1);
+	module.provider('b', {
+	    $get: function(a) {
+		return a + 2;
+	    }
 	});
-	it('returns an empty array for a non-annotated 0-arg function', function() {
-	    var injector = createInjector([]);
-	    var fn = function() { };
-	    expect(injector.annotate(fn)).toEqual([]);
+	var injector = createInjector(['myModule']);
+	expect(injector.get('b')).toBe(3);
+    });
+    it('injects the $get method of a provider lazily', function() {
+	var module = window.angular.module('myModule', []);
+	module.provider('b', {
+	    $get: function(a) {
+		return a + 2;
+	    }
 	});
-	it('returns annotations parsed from function args when not annotated', function() {
-	    var injector = createInjector([]);
-	    var fn = function(a, b) { };
-	    expect(injector.annotate(fn)).toEqual(['a', 'b']);
+	module.provider('a', {$get: _.constant(1)});
+	var injector = createInjector(['myModule']);
+	expect(injector.get('b')).toBe(3);
+    });
+    it('instantiates a dependency only once', function() {
+	var module = window.angular.module('myModule', []);
+	module.provider('a', {$get: function() { return {}; }});
+	var injector = createInjector(['myModule']);
+	expect(injector.get('a')).toBe(injector.get('a'));
+    });
+    it('notifies the user about a circular dependency', function() {
+	var module = window.angular.module('myModule', []);
+	module.provider('a', {$get: function(b) { }});
+	module.provider('b', {$get: function(c) { }});
+	module.provider('c', {$get: function(a) { }});
+	var injector = createInjector(['myModule']);
+	expect(function() {
+	    injector.get('a');
+	}).toThrowError('Circular dependency found: a <- c <- b <- a');
+    });
+    it('cleans up the circular marker when instantiation fails', function() {
+	var module = window.angular.module('myModule', []);
+	module.provider('a', {$get: function() {
+	    throw 'Failing instantiation!';
+	}});
+	var injector = createInjector(['myModule']);
+	expect(function() {
+	    injector.get('a');
+	}).toThrow('Failing instantiation!');
+	expect(function() {
+	    injector.get('a');
+	}).toThrow('Failing instantiation!');
+    });
+    it('instantiates a provider if given as a constructor function', function() {
+	var module = window.angular.module('myModule', []);
+	module.provider('a', function AProvider() {
+	    this.$get = function() { return 42; };
 	});
-	it('strips comments from argument lists when parsing', function() {
-	    var injector = createInjector([]);
-	    var fn = function(a, /*b,*/ c) { };
-	    expect(injector.annotate(fn)).toEqual(['a', 'c']);
+	var injector = createInjector(['myModule']);
+	expect(injector.get('a')).toBe(42);
+    });
+    it('injects the given provider constructor function', function() {
+	var module = window.angular.module('myModule', []);
+	module.constant('b', 2);
+	module.provider('a', function AProvider(b) {
+	    this.$get = function() { return 1 + b; };
 	});
-	it('strips several comments from argument lists when parsing', function() {
-	    var injector = createInjector([]);
-	    var fn = function(a, /*b,*/ c/*, d*/) { };
-	    expect(injector.annotate(fn)).toEqual(['a', 'c']);
+	var injector = createInjector(['myModule']);
+	expect(injector.get('a')).toBe(3);
+    });
+    it('injects another provider to a provider constructor function', function() {
+	var module = window.angular.module('myModule', []);
+	module.provider('a', function AProvider() {
+	    var value = 1;
+	    this.setValue = function(v) { value = v; };
+	    this.$get = function() { return value; };
 	});
-	it('strips // comments from argument lists when parsing', function() {
-	    var injector = createInjector([]);
-	    var fn = function(a, //b,
-			      c) { };
-	    expect(injector.annotate(fn)).toEqual(['a', 'c']);
+	module.provider('b', function BProvider(aProvider) {
+	    aProvider.setValue(2);
+	    this.$get = function() { };
 	});
-	it('strips surrounding underscores from argument names when parsing', function() {
-	    var injector = createInjector([]);
-	    var fn = function(a, _b_, c_, _d, an_argument) { };
-	    expect(injector.annotate(fn)).toEqual(['a', 'b', 'c_', '_d', 'an_argument']);
+	var injector = createInjector(['myModule']);
+	expect(injector.get('a')).toBe(2);
+    });
+    it('does not inject an instance to a provider constructor function', function() {
+	var module = window.angular.module('myModule', []);
+	module.provider('a', function AProvider() {
+	    this.$get = function() { return 1; };
 	});
-	it('throws when using a non-annotated fn in strict mode', function() {
-	    var injector = createInjector([], true);
-	    var fn = function(a, b, c) { };
-	    expect(function() {
-		injector.annotate(fn);
-	    }).toThrow();
+	module.provider('b', function BProvider(a) {
+	    this.$get = function() { return a; };
 	});
+	expect(function() {
+	    createInjector(['myModule']);
+	}).toThrow();
+    });
+    it('does not inject a provider to a $get function', function() {
+	var module = window.angular.module('myModule', []);
+	module.provider('a', function AProvider() {
+	    this.$get = function() { return 1; };
+	});
+	module.provider('b', function BProvider() {
+	    this.$get = function(aProvider) { return aProvider.$get(); };
+	});
+	var injector = createInjector(['myModule']);
+	expect(function() {
+	    injector.get('b');
+	}).toThrow();
+    });
+    it('does not give access to providers through get', function() {
+	var module = window.angular.module('myModule', []);
+	module.provider('a', function AProvider() {
+	    this.$get = function() { return 1; };
+	});
+	var injector = createInjector(['myModule']);
+	expect(function() {
+	    injector.get('aProvider');
+	}).toThrow();
+    });
+    it('registers constants first to make them available to providers', function() {
+	var module = window.angular.module('myModule', []);
+	module.provider('a', function AProvider(b) {
+	    this.$get = function() { return b; };
+	});
+	module.constant('b', 42);
+	var injector = createInjector(['myModule']);
+	expect(injector.get('a')).toBe(42);
+    });
+    it('allows injecting the instance injector to $get', function() {
+	var module = window.angular.module('myModule', []);
+	module.constant('a', 42);
+	module.provider('b', function BProvider() {
+	    this.$get = function($injector) {
+		return $injector.get('a');
+	    };
+	});
+	var injector = createInjector(['myModule']);
+	expect(injector.get('b')).toBe(42);
     });
 });
