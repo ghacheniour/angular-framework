@@ -113,6 +113,7 @@ function createInjector(modulesToLoad, strictDi) {
 	    invoke(Type, instance, locals);
 	    return instance;
 	}
+
 	return {
 	    has: function(name) {
 		return cache.hasOwnProperty(name) ||
@@ -169,6 +170,7 @@ function createInjector(modulesToLoad, strictDi) {
 	    }
 	}
     });
+
     _.forEach(_.compact(runBlocks), function(runBlock) {
 	instanceInjector.invoke(runBlock);
     });

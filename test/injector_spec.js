@@ -178,7 +178,7 @@ describe('injector', function() {
 	    }).toThrow();
 	});
     });
-        it('instantiates an annotated constructor function', function() {
+    it('instantiates an annotated constructor function', function() {
 	var module = window.angular.module('myModule', []);
 	module.constant('a', 1);
 	module.constant('b', 2);
