@@ -1,7 +1,7 @@
 'use strict';
 var _ = require('lodash');
 
-function $FilterProvider() {
+function $FilterProvider($provide) {
     var filters = {};
 
     this.register = function(name, factory) {
@@ -10,19 +10,19 @@ function $FilterProvider() {
                 return this.register(name, factory);
             }, this);
         } else {
-	    var filter = factory();
-	    filters[name] = filter;
-	    return filter;
+            return $provide.factory(name + 'Filter', factory);
         }
     };
-    
-    this.$get = function(){
+
+    this.$get = ['$injector', function($injector) {
         return function filter(name) {
-            return filters[name];
+            return $injector.get(name + 'Filter');
         };
-    };
+    }];
 
     this.register('filter', require('./filter_filter'));
 }
+
+$FilterProvider.$inject = ['$provide'];
 
 module.exports = $FilterProvider;
