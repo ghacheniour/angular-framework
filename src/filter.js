@@ -2,13 +2,12 @@
 var _ = require('lodash');
 
 function $FilterProvider($provide) {
-    var filters = {};
 
     this.register = function(name, factory) {
         if (_.isObject(name)) {
-	    return _.map(name, function(factory, name) {
+	    return _.map(name, _.bind(function(factory, name) {
                 return this.register(name, factory);
-            }, this);
+            }, this));
         } else {
             return $provide.factory(name + 'Filter', factory);
         }
