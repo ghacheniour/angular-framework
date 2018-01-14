@@ -4,19 +4,44 @@ var _ = require('lodash');
 function $QProvider() {
     this.$get = ['$rootScope', function($rootScope) {
 
-        function processQueue(state) {
+	function makePromise(value, resolved) {
+	    var d = new Deferred();
+	    if (resolved) {
+		d.resolve(value);
+	    } else {
+		d.reject(value);
+	    }
+	    return d.promise;
+	}
+
+	function handleFinallyCallback(callback, value, resolved) {
+	    var callbackValue = callback();
+	    if (callbackValue && callbackValue.then) {
+		return callbackValue.then(function() {
+		    return makePromise(value, resolved);
+		});
+	    } else {
+		return makePromise(value, resolved);
+	    }
+	}
+
+	function processQueue(state) {
             var pending = state.pending;
             state.pending = undefined;
             _.forEach(pending, function(handlers) {
                 var deferred = handlers[0];
                 var fn = handlers[state.status];
-                if (_.isFunction(fn)) {
-                    deferred.resolve(fn(state.value));
-                } else if (state.status === 1) {
-                    deferred.resolve(state.value);
-                } else {
-                    deferred.reject(state.value);
-                }
+		try {
+                    if (_.isFunction(fn)) {
+			deferred.resolve(fn(state.value));
+                    } else if (state.status === 1) {
+			deferred.resolve(state.value);
+                    } else {
+			deferred.reject(state.value);
+                    }
+		} catch (e) {
+		    deferred.reject(e);
+		}
             });
         }
 
@@ -42,11 +67,11 @@ function $QProvider() {
             return this.then(null, onRejected);
         };
         Promise.prototype.finally = function(callback) {
-            return this.then(function() {
-                callback();
-            }, function() {
-                callback();
-            });
+	    return this.then(function(value) {
+		return handleFinallyCallback(callback, value, true);
+	    }, function(rejection) {
+		return handleFinallyCallback(callback, rejection, false);
+	    });
         };
 
         function Deferred() {
@@ -55,10 +80,17 @@ function $QProvider() {
         Deferred.prototype.resolve = function(value) {
             if (this.promise.$$state.status) {
                 return;
-            } 
-            this.promise.$$state.value = value;
-            this.promise.$$state.status = 1;
-            scheduleProcessQueue(this.promise.$$state);
+            }
+	    if (value && _.isFunction(value.then)) {
+		value.then(
+		    _.bind(this.resolve, this),
+		    _.bind(this.reject, this)
+		);
+	    } else { 
+		this.promise.$$state.value = value;
+		this.promise.$$state.status = 1;
+		scheduleProcessQueue(this.promise.$$state);
+	    }
         };
         Deferred.prototype.reject = function(reason) {
             if (this.promise.$$state.status) {
