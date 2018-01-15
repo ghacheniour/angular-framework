@@ -1,8 +1,7 @@
 'use strict';
 var _ = require('lodash');
 
-function $QProvider() {
-    this.$get = ['$rootScope', function($rootScope) {
+function qFactory(callLater) {
 
 	function makePromise(value, resolved) {
 	    var d = new Deferred();
@@ -46,7 +45,7 @@ function $QProvider() {
         }
 
         function scheduleProcessQueue(state) {
-            $rootScope.$evalAsync(function() {
+            callLater(function() {
                 processQueue(state);
             });
         }
@@ -104,7 +103,7 @@ function $QProvider() {
         Deferred.prototype.notify = function(progress) {
             var pending = this.promise.$$state.pending;
             if (pending && pending.length && !this.promise.$$state.status) {
-                $rootScope.$evalAsync(function() {
+                callLater(function() {
                     _.forEach(pending, function(handlers) {
                         var deferred = handlers[0];
                         var progressBack = handlers[3];
@@ -135,30 +134,63 @@ function $QProvider() {
         }
 
         function all(promises) {
-            var results = [];
+            var results = _.isArray(promises) ? [] : {};
             var counter = 0;
             var d = defer();
             _.forEach(promises, function(promise, index) {
                 counter++;
-                promise.then(function(value) {
+                when(promise).then(function(value) {
                     results[index] = value;
                     counter--;
                     if (!counter) {
                         d.resolve(results);
                     }
+                }, function(rejection) {
+                    d.reject(rejection);
                 });
             });
+            if (!counter) {
+                d.resolve(results);
+            }
             return d.promise;
         }
 
-        return {
+        var $Q = function Q(resolver) {
+            if (!_.isFunction(resolver)) {
+                throw 'Expected function, got ' + resolver;
+            }
+            var d = defer();
+            resolver(_.bind(d.resolve, d), _.bind(d.reject, d));
+            return d.promise;
+        };
+
+        return _.extend($Q,{
             defer: defer,
             reject: reject,
             when: when,
             resolve: when,
             all: all
-        };
+        });
+}
+
+function $QProvider() {
+    this.$get = ['$rootScope', function($rootScope) {
+        return qFactory(function(callback) {
+            $rootScope.$evalAsync(callback);
+        });
     }];
 }
 
-module.exports = $QProvider;
+function $$QProvider() {
+    this.$get = function() {
+        return qFactory(function(callback) {
+            setTimeout(callback, 0);
+        });
+    };
+}
+
+module.exports = {
+    $QProvider: $QProvider,
+    $$QProvider: $$QProvider
+};
+
