@@ -171,54 +171,66 @@ function $HttpProvider() {
 	    );
 	    return deferred.promise;
 	}
+        function serverRequest(config) {
+            if (_.isUndefined(config.withCredentials) &&
+                !_.isUndefined(defaults.withCredentials)) {
+                config.withCredentials = defaults.withCredentials;
+            }
+            var reqData = transformData(
+                config.data,
+                headersGetter(config.headers),
+                undefined,
+                config.transformRequest
+            );
+            if (_.isUndefined(reqData)) {
+                _.forEach(config.headers, function(v, k) {
+                    if (k.toLowerCase() === 'content-type') {
+                        delete config.headers[k];
+                    }
+                });
+            }
+            function transformResponse(response) {
+                if (response.data) {
+                    response.data = transformData(
+                        response.data,
+                        response.headers,
+                        response.status,
+                        config.transformResponse
+                    );
+                }
+                if (isSuccess(response.status)) {
+                    return response;
+                } else {
+                    return $q.reject(response);
+                }
+            }
+            return sendReq(config, reqData)
+                .then(transformResponse, transformResponse);
+        }
 
-	function $http(requestConfig) {
+        function $http(requestConfig) {
 	    var config = _.extend({
 		method: 'GET',
 		transformRequest: defaults.transformRequest,
 		transformResponse: defaults.transformResponse,
                 paramSerializer: defaults.paramSerializer
 	    }, requestConfig);
-	    config.headers = mergeHeaders(requestConfig);
 
             if (_.isString(config.paramSerializer)) {
                 config.paramSerializer = $injector.get(config.paramSerializer);
             }
 
-	    if (_.isUndefined(config.withCredentials) &&
-		!_.isUndefined(defaults.withCredentials)) {
-		config.withCredentials = defaults.withCredentials;
-	    }
-	    var reqData = transformData(config.data,
-					headersGetter(config.headers),
-					undefined,
-					config.transformRequest);
-	    
-	    if (_.isUndefined(reqData)) {
-		_.forEach(config.headers, function(v, k) {
-		    if (k.toLowerCase() === 'content-type') {
-			delete config.headers[k];
-		    }
-		});
-	    }
-
-	    function transformResponse(response) {
-		if (response.data) {
-		    response.data = transformData(response.data,
-						  response.headers,
-						  response.status,
-						  config.transformResponse);
-		}
-		if (isSuccess(response.status)) {
-		    return response;
-		} else {
-		    return $q.reject(response);
-		}
-	    }
-
-	    return sendReq(config, reqData)
-		.then(transformResponse, transformResponse);
-	}
+            config.headers = mergeHeaders(requestConfig);
+            var promise = $q.when(config);
+            _.forEach(interceptors, function(interceptor) {
+                promise = promise.then(interceptor.request, interceptor.requestError);
+            });
+            promise = promise.then(serverRequest);
+            _.forEachRight(interceptors, function(interceptor) {
+                promise = promise.then(interceptor.response, interceptor.responseError);
+            });
+            return promise;
+        }
 
 	$http.defaults = defaults;
         _.forEach(['get', 'head', 'delete'], function(method) {
