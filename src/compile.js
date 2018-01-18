@@ -69,7 +69,12 @@ function groupScan(node, startAttr, endAttr) {
     }
     return $(nodes);
 }
-
+function groupElementsLinkFnWrapper(linkFn, attrStart, attrEnd) {
+    return function(scope, element, attrs) {
+        var group = groupScan(element[0], attrStart, attrEnd);
+        return linkFn(scope, group, attrs);
+    };
+}
 function $CompileProvider($provide) {
 
     var hasDirectives = {};
@@ -86,7 +91,10 @@ function $CompileProvider($provide) {
 		    return _.map(factories, function(factory, i) {
 			var directive = $injector.invoke(factory);
 			directive.restrict = directive.restrict || 'EA';
-			directive.priority = directive.priority || 0; 
+			directive.priority = directive.priority || 0;
+                        if (directive.link && !directive.compile) {
+                            directive.compile = _.constant(directive.link);
+                        } 
 			directive.name = directive.name || name;
 			directive.index = i; 
 			return directive;
@@ -103,10 +111,11 @@ function $CompileProvider($provide) {
 
     this.$get = ['$injector', '$rootScope', function($injector, $rootScope) {
 
-            function Attributes(element) {
-                this.$$element = element;
-                this.$attr = {};
-            }
+        function Attributes(element) {
+            this.$$element = element;
+            this.$attr = {};
+        }
+
         Attributes.prototype.$set = function(key, value, writeAttr, attrName) {
             this[key] = value;
 
@@ -171,41 +180,117 @@ function $CompileProvider($provide) {
             } 
         };
 
+        /* compile the dom: takes th dom compile it and retrn a link function*/
 	function compile($compileNodes) {
-	    return compileNodes($compileNodes);
-	}
+            var compositeLinkFn = compileNodes($compileNodes);
 
+            return function publicLinkFn(scope) {//link function for element and all its children
+                $compileNodes.data('$scope', scope); // adds sscope to compiled dom
+                compositeLinkFn(scope, $compileNodes);
+            };
+	}
+        /* collect directives, apply them and then compile children.
+           Then it will store the link fn of each node
+           which is the return value of the apply */
 	function compileNodes($compileNodes) {
-	    _.forEach($compileNodes, function(node) {
+            var linkFns = [];
+	    _.forEach($compileNodes, function(node, i) {
                 var attrs = new Attributes($(node));
                 var directives = collectDirectives(node, attrs);
-                var terminal = applyDirectivesToNode(directives, node, attrs);
-		if (!terminal && node.childNodes && node.childNodes.length) {
-		    compileNodes(node.childNodes);
+                var nodeLinkFn;
+                if (directives.length) {
+                    nodeLinkFn = applyDirectivesToNode(directives, node, attrs);
+                }
+                var childLinkFn;
+                if ((!nodeLinkFn || !nodeLinkFn.terminal) && node.childNodes && node.childNodes.length) {
+		    childLinkFn = compileNodes(node.childNodes);
 		}
+                if (nodeLinkFn || childLinkFn) {
+                    linkFns.push({
+                        nodeLinkFn: nodeLinkFn,
+                        childLinkFn: childLinkFn,
+                        idx: i
+                    });
+                }
 	    });
+
+            function compositeLinkFn(scope, linkNodes) {
+                var stableNodeList = [];
+                _.forEach(linkFns, function(linkFn) {
+                    var nodeIdx = linkFn.idx;
+                    stableNodeList[nodeIdx] = linkNodes[nodeIdx];
+                });
+                _.forEach(linkFns, function(linkFn) {
+                    if (linkFn.nodeLinkFn) {
+                        linkFn.nodeLinkFn(linkFn.childLinkFn, scope, stableNodeList[linkFn.idx]);
+                    }else{
+                        linkFn.childLinkFn( scope, stableNodeList[linkFn.idx].childNodes);
+                    }
+                });
+            }
+
+            return compositeLinkFn;
 	}
 
 	function applyDirectivesToNode(directives, compileNode, attrs) {
 	    var $compileNode = $(compileNode);
 	    var terminalPriority = -Number.MAX_VALUE;
 	    var terminal = false;
+            var preLinkFns = [], postLinkFns = [];
+            function addLinkFns(preLinkFn, postLinkFn, attrStart, attrEnd) {
+                if (preLinkFn) {
+                    if (attrStart) {
+                        preLinkFn = groupElementsLinkFnWrapper(preLinkFn, attrStart, attrEnd);
+                    }
+                    preLinkFns.push(preLinkFn);
+                }
+                if (postLinkFn) {
+                    if (attrStart) {
+                        postLinkFn = groupElementsLinkFnWrapper(postLinkFn, attrStart, attrEnd);
+                    }
+                    postLinkFns.push(postLinkFn);
+                }
+            }
 	    _.forEach(directives, function(directive) {
 		if (directive.$$start) {
 		    $compileNode = groupScan(compileNode, directive.$$start, directive.$$end);
 		}
-		if (directive.priority < terminalPriority) {
+
+                if (directive.priority < terminalPriority) {
 		    return false;
 		}
-		if (directive.compile) {
-		    directive.compile($compileNode, attrs);
+
+                if (directive.compile) {
+                    var linkFn = directive.compile($compileNode, attrs);
+                    var attrStart = directive.$$start;
+                    var attrEnd = directive.$$end;
+                    if (_.isFunction(linkFn)) {
+                        addLinkFns(null, linkFn, attrStart, attrEnd);
+                    } else if (linkFn) {
+                        addLinkFns(linkFn.pre, linkFn.post, attrStart, attrEnd);
+                    }
 		}
-		if (directive.terminal) {
+
+                if (directive.terminal) {
 		    terminal = true;
 		    terminalPriority = directive.priority;
 		}
 	    });
-	    return terminal;
+            function nodeLinkFn(childLinkFn, scope, linkNode) {
+                var $element = $(linkNode);
+                _.forEach(preLinkFns, function(linkFn) {
+                    linkFn(scope, $element, attrs);
+                });
+                if (childLinkFn) {
+                    childLinkFn(scope, linkNode.childNodes);
+                }
+                _.forEachRight(postLinkFns, function(linkFn) {
+                    var $element = $(linkNode);
+                    linkFn(scope, $element, attrs);
+                });
+            }
+            nodeLinkFn.terminal = terminal;
+            return nodeLinkFn;
 	}
 
 	function collectDirectives(node, attrs) {
