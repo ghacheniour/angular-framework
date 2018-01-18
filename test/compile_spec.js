@@ -1134,5 +1134,555 @@ describe('$compile', function() {
                 expect(givenElements.length).toBe(3);
             });
         });
+	it('makes new scope for element when directive asks for it', function() {
+	    var givenScope;
+	    var injector = makeInjectorWithDirectives('myDirective', function() {
+		return {
+		    scope: true,
+		    link: function(scope) {
+			givenScope = scope;
+		    }
+		};
+	    });
+	    injector.invoke(function($compile, $rootScope) {
+		var el = $('<div my-directive></div>');
+		$compile(el)($rootScope);
+		expect(givenScope.$parent).toBe($rootScope);
+	    });
+	});
+	it('gives inherited scope to all directives on element', function() {
+	    var givenScope;
+	    var injector = makeInjectorWithDirectives({
+		myDirective: function() {
+		    return {
+			scope: true
+		    };
+		},
+		myOtherDirective: function() {
+		    return {
+			link: function(scope) {
+			    givenScope = scope;
+			}
+		    };
+		}
+	    });
+	    injector.invoke(function($compile, $rootScope) {
+		var el = $('<div my-directive my-other-directive></div>');
+		$compile(el)($rootScope);
+		expect(givenScope.$parent).toBe($rootScope);
+	    });
+	});
+	it('adds scope class and data for element with new scope', function() {
+	    var givenScope;
+	    var injector = makeInjectorWithDirectives('myDirective', function() {
+		return {
+		    scope: true,
+		    link: function(scope) {
+			givenScope = scope;
+		    }
+		};
+	    });
+	    injector.invoke(function($compile, $rootScope) {
+		var el = $('<div my-directive></div>');
+		$compile(el)($rootScope);
+		expect(el.hasClass('ng-scope')).toBe(true);
+		expect(el.data('$scope')).toBe(givenScope);
+	    });
+	});
+	it('creates an isolate scope when requested', function() {
+	    var givenScope;
+	    var injector = makeInjectorWithDirectives('myDirective', function() {
+		return {
+		    scope: {},
+		    link: function(scope) {
+			givenScope = scope;
+		    }
+		};
+	    });
+	    injector.invoke(function($compile, $rootScope) {
+		var el = $('<div my-directive></div>');
+		$compile(el)($rootScope);
+		expect(givenScope.$parent).toBe($rootScope);
+		expect(Object.getPrototypeOf(givenScope)).not.toBe($rootScope);
+	    });
+	});
+	it('does not share isolate scope with other directives', function() {
+	    var givenScope;
+	    var injector = makeInjectorWithDirectives({
+		myDirective: function() {
+		    return {
+			scope: {}
+		    };
+		},
+		myOtherDirective: function() {
+		    return {
+			link: function(scope) {
+			    givenScope = scope;
+			}
+		    };
+		}
+	    });
+	    injector.invoke(function($compile, $rootScope) {
+		var el = $('<div my-directive my-other-directive></div>');
+		$compile(el)($rootScope);
+		expect(givenScope).toBe($rootScope);
+	    });
+	});
+	it('does not use isolate scope on child elements', function() {
+	    var givenScope;
+	    var injector = makeInjectorWithDirectives({
+		myDirective: function() {
+		    return {
+			scope: {}
+		    };
+		},
+		myOtherDirective: function() {
+		    return {
+			link: function(scope) {
+			    givenScope = scope;
+			}
+		    };
+		}
+	    });
+	    injector.invoke(function($compile, $rootScope) {
+		var el = $('<div my-directive><div my-other-directive></div></div>');
+		$compile(el)($rootScope);
+		expect(givenScope).toBe($rootScope);
+	    });
+	});
+	it('does not allow two isolate scope directives on an element', function() {
+	    var injector = makeInjectorWithDirectives({
+		myDirective: function() {
+		    return {
+			scope: {}
+		    };
+		},
+		myOtherDirective: function() {
+		    return {
+			scope: {}
+		    };
+		}
+	    });
+	    injector.invoke(function($compile, $rootScope) {
+		var el = $('<div my-directive my-other-directive></div>');
+		expect(function() {
+		    $compile(el);
+		}).toThrow();
+	    });
+	});
+	it('does not allow both isolate and inherited scopes on an element', function() {
+	    var injector = makeInjectorWithDirectives({
+		myDirective: function() {
+		    return {
+			scope: {}
+		    };
+		},
+		myOtherDirective: function() {
+		    return {
+			scope: true
+		    };
+		}
+	    });
+	    injector.invoke(function($compile, $rootScope) {
+		var el = $('<div my-directive my-other-directive></div>');
+		expect(function() {
+		    $compile(el);
+		}).toThrow();
+	    });
+	});
+	it('adds class and data for element with isolated scope', function() {
+	    var givenScope;
+	    var injector = makeInjectorWithDirectives('myDirective', function() {
+		return {
+		    scope: {},
+		    link: function(scope) {
+			givenScope = scope;
+		    }
+		};
+	    });
+	    injector.invoke(function($compile, $rootScope) {
+		var el = $('<div my-directive></div>');
+		$compile(el)($rootScope);
+		expect(el.hasClass('ng-isolate-scope')).toBe(true);
+		expect(el.hasClass('ng-scope')).toBe(false);
+		expect(el.data('$isolateScope')).toBe(givenScope);
+	    });
+	});
+	it('allows observing attribute to the isolate scope', function() {
+	    var givenScope, givenAttrs;
+	    var injector = makeInjectorWithDirectives('myDirective', function() {
+		return {
+		    scope: {
+			anAttr: '@'
+		    },
+		    link: function(scope, element, attrs) {
+			givenScope = scope;
+			givenAttrs = attrs;
+		    }
+		};
+	    });
+	    injector.invoke(function($compile, $rootScope) {
+		var el = $('<div my-directive></div>');
+		$compile(el)($rootScope);
+		givenAttrs.$set('anAttr', '42');
+		expect(givenScope.anAttr).toEqual('42');
+	    });
+	});
+	it('sets initial value of observed attr to the isolate scope', function() {
+	    var givenScope;
+	    var injector = makeInjectorWithDirectives('myDirective', function() {
+		return {
+		    scope: {
+			anAttr: '@'
+		    },
+		    link: function(scope, element, attrs) {
+			givenScope = scope;
+		    }
+		};
+	    });
+	    injector.invoke(function($compile, $rootScope) {
+		var el = $('<div my-directive an-attr="42"></div>');
+		$compile(el)($rootScope);
+		expect(givenScope.anAttr).toEqual('42');
+	    });
+	});
+	it('allows aliasing observed attribute', function() {
+	    var givenScope;
+	    var injector = makeInjectorWithDirectives('myDirective', function() {
+		return {
+		    scope: {
+			aScopeAttr: '@anAttr'
+		    },
+		    link: function(scope, element, attrs) {
+			givenScope = scope;
+		    }
+		};
+	    });
+	    injector.invoke(function($compile, $rootScope) {
+		var el = $('<div my-directive an-attr="42"></div>');
+		$compile(el)($rootScope);
+		expect(givenScope.aScopeAttr).toEqual('42');
+	    });
+	});
+	it('allows binding expression to isolate scope', function() {
+	    var givenScope;
+	    var injector = makeInjectorWithDirectives('myDirective', function() {
+		return {
+		    scope: {
+			anAttr: '<'
+		    },
+		    link: function(scope) {
+			givenScope = scope;
+		    }
+		};
+	    });
+	    injector.invoke(function($compile, $rootScope) {
+		var el = $('<div my-directive an-attr="42"></div>');
+		$compile(el)($rootScope);
+		expect(givenScope.anAttr).toBe(42);
+	    });
+	});
+	it('allows aliasing expression attribute on isolate scope', function() {
+	    var givenScope;
+	    var injector = makeInjectorWithDirectives('myDirective', function() {
+		return {
+		    scope: {
+			myAttr: '<theAttr'
+		    },
+		    link: function(scope) {
+			givenScope = scope;
+		    }
+		};
+	    });
+	    injector.invoke(function($compile, $rootScope) {
+		var el = $('<div my-directive the-attr="42"></div>');
+		$compile(el)($rootScope);
+		expect(givenScope.myAttr).toBe(42);
+	    });
+	});
+	it('evaluates isolate scope expression on parent scope', function() {
+	    var givenScope;
+	    var injector = makeInjectorWithDirectives('myDirective', function() {
+		return {
+		    scope: {
+			myAttr: '<'
+		    },
+		    link: function(scope) {
+			givenScope = scope;
+		    }
+		};
+	    });
+	    injector.invoke(function($compile, $rootScope) {
+		$rootScope.parentAttr = 41;
+		var el = $('<div my-directive my-attr="parentAttr + 1"></div>');
+		$compile(el)($rootScope);
+		expect(givenScope.myAttr).toBe(42);
+	    });
+	});
+	it('watches isolated scope expressions', function() {
+	    var givenScope;
+	    var injector = makeInjectorWithDirectives('myDirective', function() {
+		return {
+		    scope: {
+			myAttr: '<'
+		    },
+		    link: function(scope) {
+			givenScope = scope;
+		    }
+		};
+	    });
+	    injector.invoke(function($compile, $rootScope) {
+		var el = $('<div my-directive my-attr="parentAttr + 1"></div>');
+		$compile(el)($rootScope);
+		$rootScope.parentAttr = 41;
+		$rootScope.$digest();
+		expect(givenScope.myAttr).toBe(42);
+	    });
+	});
+	it('does not watch optional missing isolate scope expressions', function() {
+	    var givenScope;
+	    var injector = makeInjectorWithDirectives('myDirective', function() {
+		return {
+		    scope: {
+			myAttr: '<?'
+		    },
+		    link: function(scope) {
+			givenScope = scope;
+		    }
+		};
+	    });
+	    injector.invoke(function($compile, $rootScope) {
+		var el = $('<div my-directive></div>');
+		$compile(el)($rootScope);
+		expect($rootScope.$$watchers.length).toBe(0);
+	    });
+	});
+	it('allows binding two-way expression to isolate scope', function() {
+	    var givenScope;
+	    var injector = makeInjectorWithDirectives('myDirective', function() {
+		return {
+		    scope: {
+			anAttr: '='
+		    },
+		    link: function(scope) {
+			givenScope = scope;
+		    }
+		};
+	    });
+	    injector.invoke(function($compile, $rootScope) {
+		var el = $('<div my-directive an-attr="42"></div>');
+		$compile(el)($rootScope);
+		expect(givenScope.anAttr).toBe(42);
+	    });
+	});
+	it('allows aliasing two-way expression attribute on isolate scope', function() {
+	    var givenScope;
+	    var injector = makeInjectorWithDirectives('myDirective', function() {
+		return {
+		    scope: {
+			myAttr: '=theAttr'
+		    },
+		    link: function(scope) {
+			givenScope = scope;
+		    }
+		};
+	    });
+	    injector.invoke(function($compile, $rootScope) {
+		var el = $('<div my-directive the-attr="42"></div>');
+		$compile(el)($rootScope);
+		expect(givenScope.myAttr).toBe(42);
+	    });
+	});
+	it('watches two-way expressions', function() {
+	    var givenScope;
+	    var injector = makeInjectorWithDirectives('myDirective', function() {
+		return {
+		    scope: {
+			myAttr: '='
+		    },
+		    link: function(scope) {
+			givenScope = scope;
+		    }
+		};
+	    });
+	    injector.invoke(function($compile, $rootScope) {
+		var el = $('<div my-directive my-attr="parentAttr + 1"></div>');
+		$compile(el)($rootScope);
+		$rootScope.parentAttr = 41;
+		$rootScope.$digest();
+		expect(givenScope.myAttr).toBe(42);
+	    });
+	});
+	it('does not watch optional missing two-way expressions', function() {
+	    var givenScope;
+	    var injector = makeInjectorWithDirectives('myDirective', function() {
+		return {
+		    scope: {
+			myAttr: '=?'
+		    },
+		    link: function(scope) {
+			givenScope = scope;
+		    }
+		};
+	    });
+	    injector.invoke(function($compile, $rootScope) {
+		var el = $('<div my-directive></div>');
+		$compile(el)($rootScope);
+		expect($rootScope.$$watchers.length).toBe(0);
+	    });
+	});
+	it('allows assigning to two-way scope expressions', function() {
+	    var isolateScope;
+	    var injector = makeInjectorWithDirectives('myDirective', function() {
+		return {
+		    scope: {
+			myAttr: '='
+		    },
+		    link: function(scope) {
+			isolateScope = scope;
+		    }
+		};
+	    });
+	    injector.invoke(function($compile, $rootScope) {
+		var el = $('<div my-directive my-attr="parentAttr"></div>');
+		$compile(el)($rootScope);
+		isolateScope.myAttr = 42;
+		$rootScope.$digest();
+		expect($rootScope.parentAttr).toBe(42);
+	    });
+	});
+	it('gives parent change precedence when both parent and child change', function() {
+	    var isolateScope;
+	    var injector = makeInjectorWithDirectives('myDirective', function() {
+		return {
+		    scope: {
+			myAttr: '='
+		    },
+		    link: function(scope) {
+			isolateScope = scope;
+		    }
+		};
+	    });
+	    injector.invoke(function($compile, $rootScope) {
+		var el = $('<div my-directive my-attr="parentAttr"></div>');
+		$compile(el)($rootScope);
+		$rootScope.parentAttr = 42;
+		isolateScope.myAttr = 43;
+		$rootScope.$digest();
+		expect($rootScope.parentAttr).toBe(42);
+		expect(isolateScope.myAttr).toBe(42);
+	    });
+	});
+	it('throws when two-way expression returns new arrays', function() {
+	    var givenScope;
+	    var injector = makeInjectorWithDirectives('myDirective', function() {
+		return {
+		    scope: {
+			myAttr: '='
+		    },
+		    link: function(scope) {
+			givenScope = scope;
+		    }
+		};
+	    });
+	    injector.invoke(function($compile, $rootScope) {
+		$rootScope.parentFunction = function() {
+		    return [1, 2, 3];
+		};
+		var el = $('<div my-directive my-attr="parentFunction()"></div>');
+		$compile(el)($rootScope);
+		expect(function() {
+		    $rootScope.$digest();
+		}).toThrow();
+	    });
+	});
+	it('can watch two-way bindings as collections', function() {
+	    var givenScope;
+	    var injector = makeInjectorWithDirectives('myDirective', function() {
+		return {
+		    scope: {
+			myAttr: '=*'
+		    },
+		    link: function(scope) {
+			givenScope = scope;
+		    }
+		};
+	    });
+	    injector.invoke(function($compile, $rootScope) {
+		$rootScope.parentFunction = function() {
+		    return [1, 2, 3];
+		};
+		var el = $('<div my-directive my-attr="parentFunction()"></div>');
+		$compile(el)($rootScope);
+		$rootScope.$digest();
+		expect(givenScope.myAttr).toEqual([1, 2, 3]);
+	    });
+	});
+	it('allows binding an invokable expression on the parent scope', function() {
+	    var givenScope;
+	    var injector = makeInjectorWithDirectives('myDirective', function() {
+		return {
+		    scope: {
+			myExpr: '&'
+		    },
+		    link: function(scope) {
+			givenScope = scope;
+		    }
+		};
+	    });
+	    injector.invoke(function($compile, $rootScope) {
+		$rootScope.parentFunction = function() {
+		    return 42;
+		};
+		var el = $('<div my-directive my-expr="parentFunction() + 1"></div>');
+		$compile(el)($rootScope);
+		expect(givenScope.myExpr()).toBe(43);
+	    });
+	});
+	it('allows passing arguments to parent scope expression', function() {
+	    var givenScope;
+	    var injector = makeInjectorWithDirectives('myDirective', function() {
+		return {
+		    scope: {
+			myExpr: '&'
+		    },
+		    link: function(scope) {
+			givenScope = scope;
+		    }
+		};
+	    });
+	    injector.invoke(function($compile, $rootScope) {
+		var gotArg;
+		$rootScope.parentFunction = function(arg) {
+		    gotArg = arg;
+		};
+		var el = $('<div my-directive my-expr="parentFunction(argFromChild)"></div>');
+		$compile(el)($rootScope);
+		givenScope.myExpr({argFromChild: 42});
+		expect(gotArg).toBe(42);
+	    });
+	});
+	it('sets missing optional parent scope expression to undefined', function() {
+	    var givenScope;
+	    var injector = makeInjectorWithDirectives('myDirective', function() {
+		return {
+		    scope: {
+			myExpr: '&?'
+		    },
+		    link: function(scope) {
+			givenScope = scope;
+		    }
+		};
+	    });
+	    injector.invoke(function($compile, $rootScope) {
+		var gotArg;
+		$rootScope.parentFunction = function(arg) {
+		    gotArg = arg;
+		};
+		var el = $('<div my-directive></div>');
+		$compile(el)($rootScope);
+		expect(givenScope.myExpr).toBeUndefined();
+	    });
+	});
     });
 });
