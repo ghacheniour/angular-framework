@@ -291,6 +291,7 @@ function $CompileProvider($provide) {
             var preLinkFns = [], postLinkFns = [], controllers = {};
 	    var newScopeDirective, newIsolateScopeDirective;
             var controllerDirectives;
+            var templateDirective;
 
             function getControllers(require, $element) {
                 if (_.isArray(require)) {
@@ -392,6 +393,15 @@ function $CompileProvider($provide) {
                 if (directive.controller) {
                     controllerDirectives = controllerDirectives || {};
                     controllerDirectives[directive.name] = directive;
+                }
+                if (directive.template) {
+                    if (templateDirective) {
+                        throw 'Multiple directives asking for template';
+                    }
+                    templateDirective = directive;
+                    $compileNode.html(_.isFunction(directive.template) ?
+                                      directive.template($compileNode, attrs) :
+                                      directive.template);
                 }
 	    });
             function nodeLinkFn(childLinkFn, scope, linkNode) {

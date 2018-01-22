@@ -2360,4 +2360,84 @@ describe('$compile', function() {
             });
         });
     });
+    describe('template', function() {
+        it('populates an element during compilation', function() {
+            var injector = makeInjectorWithDirectives('myDirective', function() {
+                return {
+                    template: '<div class="from-template"></div>'
+                };
+            });
+            injector.invoke(function($compile) {
+                var el = $('<div my-directive></div>');
+                $compile(el);
+                expect(el.find('> .from-template').length).toBe(1);
+            });
+        });
+        it('replaces any existing children', function() {
+            var injector = makeInjectorWithDirectives('myDirective', function() {
+                return {
+                    template: '<div class="from-template"></div>'
+                };
+            });
+            injector.invoke(function($compile) {
+                var el = $('<div my-directive><div class="existing"></div></div>');
+                $compile(el);
+                expect(el.find('> .existing').length).toBe(0);
+            });
+        });
+        it('compiles template contents also', function() {
+            var compileSpy = jasmine.createSpy();
+            var injector = makeInjectorWithDirectives({
+                myDirective: function() {
+                    return {
+                        template: '<div my-other-directive></div>'
+                    };
+                },
+                myOtherDirective: function() {
+                    return {
+                        compile: compileSpy
+                    };
+                }
+            });
+            injector.invoke(function($compile) {
+                var el = $('<div my-directive></div>');
+                $compile(el);
+                expect(compileSpy).toHaveBeenCalled();
+            });
+        });
+        it('does not allow two directives with templates', function() {
+            var injector = makeInjectorWithDirectives({
+                myDirective: function() {
+                    return {template: '<div></div>'};
+                },
+                myOtherDirective: function() {
+                    return {template: '<div></div>'};
+                }
+            });
+            injector.invoke(function($compile) {
+                var el = $('<div my-directive my-other-directive></div>');
+                expect(function() {
+                    $compile(el);
+                }).toThrow();
+            });
+        });
+        it('supports functions as template values', function() {
+            var templateSpy = jasmine.createSpy().and.returnValue('<div class="from-template"></div>');
+            var injector = makeInjectorWithDirectives({
+                myDirective: function() {
+                    return {
+                        template: templateSpy
+                    };
+                }
+            });
+            injector.invoke(function($compile) {
+                var el = $('<div my-directive></div>');
+                $compile(el);
+                expect(el.find('> .from-template').length).toBe(1);
+                // Check that template function was called with element and attrs
+                expect(templateSpy.calls.first().args[0][0]).toBe(el[0]);
+                expect(templateSpy.calls.first().args[1].myDirective).toBeDefined();
+            });
+        });
+    });
 });
