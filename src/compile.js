@@ -2,6 +2,7 @@
 
 var _ = require('lodash');
 var $ = require('jquery');
+var identifierForController = require('./controller').identifierForController;
 
 function nodeName(element) {
     return element.nodeName ? element.nodeName : element[0].nodeName;
@@ -151,6 +152,41 @@ function $CompileProvider($provide) {
 		this.directive(name, directiveFactory);
 	    }, this));
 	}
+    };
+
+    this.component = function(name, options) {
+        function makeInjectable(template, $injector) {
+            if (_.isFunction(template) || _.isArray(template)) {
+                return function(element, attrs) {
+                    return $injector.invoke(template, this, {
+                        $element: element,
+                        $attrs: attrs
+                    });
+                };
+            } else {
+                return template;
+            }
+        }
+
+        function factory($injector) {
+            return {
+                restrict: 'E',
+                controller: options.controller,
+                controllerAs: options.controllerAs ||
+                    identifierForController(options.controller) ||
+                    '$ctrl',
+                scope: {},
+                bindToController: options.bindings || {},
+                templateUrl: makeInjectable(options.templateUrl, $injector),
+                template: makeInjectable(options.template, $injector),
+                transclude: options.transclude,
+                require: options.require
+            };
+        }
+
+        factory.$inject = ['$injector'];
+
+        return this.directive(name, factory);
     };
 
     this.$get = ['$injector', '$parse', '$controller', '$rootScope', '$http', '$interpolate', function($injector, $parse, $controller, $rootScope, $http, $interpolate) {
@@ -318,6 +354,18 @@ function $CompileProvider($provide) {
             if (removedClasses.length) {
                 this.$removeClass(removedClasses.join(' '));
             } 
+        };
+
+        function UNINITIALIZED_VALUE() { }
+        var _UNINITIALIZED_VALUE = new UNINITIALIZED_VALUE();
+
+        function SimpleChange(previous, current) {
+            this.previousValue = previous;
+            this.currentValue = current;
+        }
+
+        SimpleChange.prototype.isFirstChange = function() {
+            return this.previousValue === _UNINITIALIZED_VALUE;
         };
 
         /* compile the dom: takes th dom compile it and retrn a link function*/
@@ -608,7 +656,7 @@ function $CompileProvider($provide) {
 		}
                 var scopeDirective = newIsolateScopeDirective || newScopeDirective;
                 if (scopeDirective && controllers[scopeDirective.name]) {
-                    initializeDirectiveBindings(
+                    controllers[scopeDirective.name].initialChanges = initializeDirectiveBindings(
                         scope,
                         attrs,
                         controllers[scopeDirective.name].instance,
@@ -625,6 +673,20 @@ function $CompileProvider($provide) {
                         var controller = controllers[controllerDirective.name].instance;
                         var requiredControllers = getControllers(require, $element);
                         _.assign(controller, requiredControllers);
+                    }
+                });
+                _.forEach(controllers, function(controller) {
+                    var controllerInstance = controller.instance;
+                    if (controllerInstance.$onInit) {
+                        controllerInstance.$onInit();
+                    }
+                    if (controllerInstance.$onChanges) {
+                        controllerInstance.$onChanges(controller.initialChanges);
+                    }
+                    if (controllerInstance.$onDestroy) {
+                        (newIsolateScopeDirective ? isolateScope : scope).$on('$destroy', function() {
+                            controllerInstance.$onDestroy();
+                        });
                     }
                 });
                 function scopeBoundTranscludeFn(transcludedScope, cloneAttachFn) {
@@ -656,6 +718,12 @@ function $CompileProvider($provide) {
                 _.forEachRight(postLinkFns, function(linkFn) {
                     var $element = $(linkNode);
                     linkFn(linkFn.isolateScope ? isolateScope : scope, $element, attrs, linkFn.require && getControllers(linkFn.require, $element), scopeBoundTranscludeFn);
+                });
+                _.forEach(controllers, function(controller) {
+                    var controllerInstance = controller.instance;
+                    if (controllerInstance.$postLink) {
+                        controllerInstance.$postLink();
+                    }
                 });
             }
             nodeLinkFn.terminal = terminal;
@@ -758,6 +826,7 @@ function $CompileProvider($provide) {
 	}
 
         function initializeDirectiveBindings(scope, attrs, destination, bindings, newScope) {
+            var initialChanges = {};
             _.forEach(bindings, function(definition, scopeName) {
                 var attrName = definition.attrName;
                 switch (definition.mode) {
@@ -768,6 +837,7 @@ function $CompileProvider($provide) {
                     if (attrs[attrName]) {
 			destination[scopeName] = $interpolate(attrs[attrName])(scope);
                     }
+                    initialChanges[scopeName] = new SimpleChange(_UNINITIALIZED_VALUE, destination[scopeName]);
                     break;
                 case '<':
                     if (definition.optional && !attrs[attrName]) {
@@ -779,6 +849,7 @@ function $CompileProvider($provide) {
                         destination[scopeName] = newValue;
                     });
                     newScope.$on('$destroy', unwatch);
+                    initialChanges[scopeName] = new SimpleChange(_UNINITIALIZED_VALUE, destination[scopeName]);
                     break;
                 case '=':
                     if (definition.optional && !attrs[attrName]) {
@@ -818,6 +889,7 @@ function $CompileProvider($provide) {
                     break;
                 }
             });
+            return initialChanges;
         }
         
 
